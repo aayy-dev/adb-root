@@ -6,20 +6,17 @@
 # adbd decides to stay root it must dyntransition adbd -> <T>, which base policy
 # denies -> adbd LOG(FATAL)s and init respawns it as shell. Allowing that
 # dyntransition (and relaxing <T>) is the actual fix -- not the properties.
-# Verified on an AVD: adbd then runs as root in u:r:<T>:s0 and every adb shell
-# is root. Magisk does NOT reliably auto-apply module sepolicy.rule, so we apply
-# live with magiskpolicy.
+# Magisk does not reliably auto-apply a module sepolicy.rule, so we apply live.
 
 apply_adbroot() {
     MAGISKPOLICY=/data/adb/magisk/magiskpolicy
-    [ -x "$MAGISKPOLICY" ] || MAGISKPOLICY=$(command -v magiskpolicy 2>/dev/null)
-    [ -x "$MAGISKPOLICY" ] || MAGISKPOLICY=$(command -v magiskpolicy)
+    [ -x "$MAGISKPOLICY" ] || MAGISKPOLICY=$(command -v magiskpolicy) || MAGISKPOLICY=magiskpolicy
 
-    # Robust defaults: su and adbd types always exist on a Magisk device.
-    # - adbd -> su dyntransition + permissive su covers ROMs whose adbd uses
-    #   root_seclabel=u:r:su:s0 (the common case).
-    # - permissive adbd covers ROMs that pass no root_seclabel (adbd stays in
-    #   its own domain when root). Harmless where it doesn't apply.
+    # su and adbd types always exist on a Magisk device:
+    #  - adbd->su dyntransition + permissive su covers ROMs whose adbd uses
+    #    root_seclabel=u:r:su:s0 (the common case). permissive su is REQUIRED --
+    #    an enforcing su domain leaves adbd root but the adb transport offline.
+    #  - permissive adbd covers ROMs that pass no root_seclabel.
     "$MAGISKPOLICY" --live \
         "allow adbd su process dyntransition" \
         "permissive su" \

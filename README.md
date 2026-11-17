@@ -103,20 +103,28 @@ Remove: delete `/data/adb/modules/adbroot` (or tap-disable in Magisk) + reboot.
 Releases are built and published automatically by GitHub Actions
 (`.github/workflows/release.yml`) whenever `version` in `module.prop` changes.
 
-## Caveats / portability
+## Caveats / trade-offs
 
+- **App JDWP debugging breaks while adb root is ON.** Because adbd runs in
+  `u:r:su:s0`, the platform's JDWP `connectto u:r:adbd:s0` rule no longer
+  matches, so attaching a debugger (Android Studio / `adb jdwp`) to an app
+  fails. Toggle adb root **OFF** (Magisk Action button) when you need to debug
+  apps, then back ON.
+- **`permissive su` is required, not optional.** An enforcing `su` domain leaves
+  adbd running as root but the adb transport never completes its handshake (adb
+  shows the device `offline`). A minimal explicit allow-set is impractical — the
+  permissions an interactive root shell needs are open-ended — so `permissive
+  su` is the pragmatic choice. KernelSU likewise runs adbd in a dedicated
+  permissive-style domain, so this is comparable, not worse.
+- **`ro.secure=0`** is set system-wide (consumed mainly by adbd; some
+  security/CTS checks read it). `ro.debuggable` is left at 0, so the most
+  Play-Integrity-visible flag is untouched.
 - **ROM-specific seclabel:** the rule is keyed to adbd's `--root_seclabel`.
-  `common.sh` handles the common `su` case and auto-detects other types, but a
-  ROM with an unusual policy could need tuning — check `dmesg | grep avc`.
-- **`ro.secure=0`** is required (but `ro.debuggable` is left at 0, so the most
-  Play-Integrity-visible flag is untouched). `permissive su` relaxes SELinux
-  enforcement for the (root) adbd domain; it can be tightened to explicit
-  `allow` rules by enumerating denials, at some brittleness cost. KernelSU
-  likewise runs adbd in a dedicated permissive-style domain, so this is
-  comparable, not worse.
-- **Tested only on one AVD** (Magisk 30.6, arm64, Android user build). The
-  mechanism is grounded in AOSP + on-device evidence, but confirm on your target
-  device.
+  `common.sh` handles the common `su` case and auto-detects other types; a ROM
+  with an unusual policy could need tuning — check `dmesg | grep avc`.
+- **Tested on a Magisk 30.6 arm64 user-build AVD**, including an adversarial
+  review with on-device validation. The mechanism is grounded in AOSP +
+  on-device evidence, but confirm on your target device.
 
 ## History
 
