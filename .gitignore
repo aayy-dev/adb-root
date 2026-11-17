@@ -1,0 +1,6 @@
+# build artifacts
+*.zip
+obj/
+libs/
+# os cruft
+.DS_Store

@@ -1,0 +1,6 @@
+id=adbroot
+name=ADB Root (sepolicy + props)
+version=v1.0
+versionCode=3
+author=you
+description=Makes stock adbd run as root so `adb shell` and `adb shell <cmd>` are both root. No KernelSU, no custom kernel, ro.debuggable left untouched. Works by allowing adbd's SELinux dyntransition into its root_seclabel + setting ro.secure/service.adb.root.
