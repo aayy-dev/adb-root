@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# After boot: re-assert only if needed, and self-heal so a failure can never
-# leave the system with ro.secure=0 paired with a non-root adbd.
+# After boot: guarantee adbd is root, and self-heal so a failure can never leave
+# the system with ro.secure=0 paired with a non-root adbd.
 MODDIR=${0%/*}
 . "$MODDIR/common.sh"
 
@@ -11,20 +11,36 @@ adbd_is_root() {
 
 until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 1; done
 
-# Normal path: post-fs-data already brought adbd up root -> nothing to do, and
-# we avoid a needless adbd bounce (which would drop any early adb session).
+# If post-fs-data already brought adbd up root (ROMs that don't reset ro.secure),
+# there is nothing to do -- and we skip a needless adbd bounce.
 adbd_is_root && exit 0
 
-# adbd isn't root (e.g. /apex wasn't mounted yet at post-fs-data on an exotic
-# ROM): apply now (/apex is guaranteed mounted post-boot) and restart.
-apply_adbroot
+# On ROMs like FireOS, ro.secure is reasserted to 1 during early boot (after
+# post-fs-data runs), so adbd starts as shell. The reassertion stops a few
+# seconds after boot_completed. Re-apply until ro.secure actually reads back 0
+# (i.e. the value finally sticks), THEN restart adbd once so it re-reads the
+# props as root. Restarting earlier -- while the value is still being reset --
+# just yields another shell adbd, which is exactly what the naive version did.
+i=0
+while [ "$i" -lt 30 ]; do
+    apply_adbroot
+    sleep 2
+    [ "$(getprop ro.secure)" = "0" ] && break
+    i=$((i + 1))
+done
 setprop ctl.restart adbd
-sleep 4
+sleep 5
 
-# Still not root? AOSP has already respawned adbd as a usable shell; revert the
-# props so adb still works as a normal shell and we don't leave ro.secure=0 set.
+# Race fallback: if adbd lost the restart race, try once more.
 if ! adbd_is_root; then
-    resetprop -n ro.secure 1
+    apply_adbroot
+    setprop ctl.restart adbd
+    sleep 5
+fi
+
+# Self-heal: never leave ro.secure=0 paired with a non-root adbd.
+if ! adbd_is_root; then
+    resetprop ro.secure 1
     resetprop service.adb.root 0
     setprop ctl.restart adbd
 fi

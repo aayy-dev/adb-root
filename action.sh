@@ -19,7 +19,7 @@ cur=$(adbd_uid)
 
 if [ "$cur" = "0" ]; then
     echo "ADB root is ON  ->  turning OFF (until re-toggled or next boot)"
-    resetprop -n ro.secure 1
+    resetprop ro.secure 1
     resetprop service.adb.root 0
     setprop ctl.restart adbd
 else
