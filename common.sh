@@ -33,6 +33,11 @@ apply_adbroot() {
     #  - system_server<->su fd/socket/pipe/pty rules: let the binder SHELL_COMMAND
     #    path work, so cmd/pm/settings/am/appops/dumpsys do not fail with
     #    `Failed transaction (2147483646)`.
+    #  - system_server->su binder {call transfer}: `adb install` streams via the
+    #    `abb` helper (in the su context) and registers a result callback;
+    #    system_server calls BACK into su to deliver the result. Base policy denies
+    #    (and dontaudits) that, so abb hangs forever waiting. cmd/pm don't use a
+    #    cross-process callback, which is why only install hangs.
     "$MP" --live \
         "allow adbd su process dyntransition" \
         "permissive su" \
@@ -45,7 +50,8 @@ apply_adbroot() {
         "allow system_server su fd use" \
         "allow system_server su unix_stream_socket { read write getattr getopt setopt }" \
         "allow system_server su fifo_file { read write getattr ioctl }" \
-        "allow system_server su chr_file { read write getattr ioctl }" 2>/dev/null
+        "allow system_server su chr_file { read write getattr ioctl }" \
+        "allow system_server su binder { call transfer }" 2>/dev/null
 
     # Portability: if this ROM uses some OTHER root_seclabel type, relax it too.
     RL=$(grep -rhoE -- '--root_seclabel=u:r:[a-zA-Z0-9_]+:s0' \
@@ -64,7 +70,8 @@ apply_adbroot() {
             "allow system_server $T fd use" \
             "allow system_server $T unix_stream_socket { read write getattr getopt setopt }" \
             "allow system_server $T fifo_file { read write getattr ioctl }" \
-            "allow system_server $T chr_file { read write getattr ioctl }" 2>/dev/null
+            "allow system_server $T chr_file { read write getattr ioctl }" \
+            "allow system_server $T binder { call transfer }" 2>/dev/null
     fi
 
     # Keep adbd root. ro.secure=0 alone suffices; service.adb.root=1 also covers

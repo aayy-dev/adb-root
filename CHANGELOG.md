@@ -5,16 +5,20 @@
   `adb shell <cmd>` are root. No KernelSU, no custom kernel, `ro.debuggable`
   left untouched.
 - Mechanism: `magiskpolicy --live` rules + `ro.secure=0` / `service.adb.root=1`.
-  Three blockers cleared (all verified on-device):
+  Blockers cleared (all verified on-device):
   - `adbd->su` dyntransition denial (adbd would SIGABRT and respawn as shell);
   - on real devices, `netd` (enforcing) denied `use` on a root adbd's
     `su`-labelled sockets, leaving the transport `offline` — fixed with
     `allow netd su fd use` + netd<->su socket perms;
-  - `cmd`/`pm`/`settings`/`am`/`appops`/`dumpsys`/`adb install` failed with
+  - `cmd`/`pm`/`settings`/`am`/`appops`/`dumpsys` failed with
     `Failed transaction (2147483646)` because the binder SHELL_COMMAND path
     passes the `su`-labelled shell fds to `system_server` (enforcing), which was
     denied `use` on them — fixed with `allow system_server su fd use` +
     system_server<->su socket/pipe/pty perms;
+  - `adb install` hung (no error): it streams via the `abb` helper in the `su`
+    context, and system_server calls back over binder to deliver the result,
+    which base policy denies and `dontaudit`s (invisible in `dmesg`) — fixed with
+    `allow system_server su binder { call transfer }`;
   - on FireOS, `ro.secure` is reasserted to 1 during early boot, so `service.sh`
     now retries until `ro.secure` reads back 0, then restarts adbd once
     (`resetprop` used without `-n`, which does not persist there).

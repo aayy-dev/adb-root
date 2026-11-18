@@ -93,12 +93,32 @@ avc: denied { use } comm="cmd" scontext=u:r:system_server:s0 \
      tcontext=u:r:su:s0 tclass=fd permissive=0
 ```
 
-(`adb install` hits the same wall — it streams the APK over that stdin fd.) Same
-shape as Blocker 2, different enforcing peer. Fix: allow **system_server** to
-operate on `su`-labelled fds, sockets, pipes and ptys (`allow system_server su fd
-use` + the socket/fifo/chr_file perms). Note `service list` still worked without
-this — it only talks to servicemanager and passes no fds, which is why the
-breakage looks selective.
+Same shape as Blocker 2, different enforcing peer. Fix: allow **system_server**
+to operate on `su`-labelled fds, sockets, pipes and ptys (`allow system_server su
+fd use` + the socket/fifo/chr_file perms). Note `service list` still worked
+without this — it only talks to servicemanager and passes no fds, which is why
+the breakage looks selective.
+
+### Blocker 3b — `adb install` hangs (the binder result callback)
+
+`adb install` is sneakier. It streams the APK through the **`abb`** (Android
+Binder Bridge) helper, which runs in the `su` context. The install itself
+succeeds, but when it finishes **system_server calls *back* into `abb` over
+binder** to deliver the result (the `IPackageInstallObserver` callback). Base
+policy denies that `system_server -> su` binder call *and `dontaudit`s it*, so
+nothing shows up in `dmesg` — `abb` just blocks forever waiting for a result
+that never arrives, and `adb install` hangs with no error:
+
+```
+avc: denied { call } scontext=u:r:system_server:s0 tcontext=u:r:su:s0 \
+     tclass=binder   # suppressed by a dontaudit rule — invisible in dmesg
+```
+
+`cmd`/`pm`/`settings` don't register a cross-process callback, which is why they
+work with the fd rules alone but `install` still hung. Fix: `allow system_server
+su binder { call transfer }`. (Found by bisecting: making `system_server`
+permissive fixed it, but no denial logged — the giveaway for a `dontaudit`'d
+binder callback.)
 
 ### Blocker 4 — `ro.secure` is reasserted during early boot (FireOS)
 
@@ -125,8 +145,9 @@ rules are applied live with `magiskpolicy --live`.
 
 - `common.sh` (`apply_adbroot`): applies the SELinux rules (dyntransition +
   `permissive su`/`permissive adbd` + the netd↔su and system_server↔su
-  fd/socket rules; auto-detects and relaxes a non-`su` `root_seclabel`), then
-  sets `ro.secure=0` and `service.adb.root=1`.
+  fd/socket rules + the system_server→su binder callback rule; auto-detects and
+  relaxes a non-`su` `root_seclabel`), then sets `ro.secure=0` and
+  `service.adb.root=1`.
 - `post-fs-data.sh`: runs `apply_adbroot` early so adbd can come up root on its
   first start on ROMs that don't reset `ro.secure` (no restart needed there).
 - `service.sh`: after boot, if adbd isn't already root, re-applies until
