@@ -14,6 +14,9 @@ Verified end-to-end from a clean reboot on:
 
 - **Fire TV Stick 4K Max (`karat` / AFTKRT), FireOS 11 (Android 11), user build,
   SELinux enforcing, Magisk 30.7** — the hard case; see the FireOS notes below.
+- **onn 4K Pro (Google TV, `jarvis`), user build, SELinux enforcing, Magisk
+  30.7** — root at boot plus `cmd`/`pm`/`settings`/`adb install` all working.
+- A OnePlus 10T (`GN2200`), Android 16, Magisk 30.7.
 - A Magisk 30.6 arm64 **user**-build AVD.
 
 ```
@@ -73,7 +76,31 @@ Fix: allow **netd** to operate on `su`-labelled fds/sockets
 (`allow netd su fd use` + the netd↔su socket perms). The AVD never hit this
 because the emulator doesn't fwmark adbd's sockets the same way.
 
-### Blocker 3 — `ro.secure` is reasserted during early boot (FireOS)
+### Blocker 3 — system_server can't service shell-command fds (real devices)
+
+`cmd`, `pm`, `settings`, `am`, `appops`, `dumpsys` and friends don't do the work
+in your shell — they hand it to a framework service over the binder
+**SHELL_COMMAND** transaction, passing your shell's stdin/stdout/stderr fds along
+so the service can read args and write output. With the shell in `su:s0` those
+fds are labelled `su:s0`, and **system_server stays enforcing**, so it's denied
+`use` on them and the whole transaction aborts:
+
+```
+$ adb shell cmd package list packages
+cmd: Failure calling service package: Failed transaction (2147483646)
+
+avc: denied { use } comm="cmd" scontext=u:r:system_server:s0 \
+     tcontext=u:r:su:s0 tclass=fd permissive=0
+```
+
+(`adb install` hits the same wall — it streams the APK over that stdin fd.) Same
+shape as Blocker 2, different enforcing peer. Fix: allow **system_server** to
+operate on `su`-labelled fds, sockets, pipes and ptys (`allow system_server su fd
+use` + the socket/fifo/chr_file perms). Note `service list` still worked without
+this — it only talks to servicemanager and passes no fds, which is why the
+breakage looks selective.
+
+### Blocker 4 — `ro.secure` is reasserted during early boot (FireOS)
 
 On FireOS, `ro.secure` is set back to `1` *during* boot, **after**
 `post-fs-data` runs — so adbd starts (as shell) before our value takes hold. The
@@ -97,9 +124,9 @@ rules are applied live with `magiskpolicy --live`.
 ### What the module does
 
 - `common.sh` (`apply_adbroot`): applies the SELinux rules (dyntransition +
-  `permissive su`/`permissive adbd` + the netd↔su fd/socket rules; auto-detects
-  and relaxes a non-`su` `root_seclabel`), then sets `ro.secure=0` and
-  `service.adb.root=1`.
+  `permissive su`/`permissive adbd` + the netd↔su and system_server↔su
+  fd/socket rules; auto-detects and relaxes a non-`su` `root_seclabel`), then
+  sets `ro.secure=0` and `service.adb.root=1`.
 - `post-fs-data.sh`: runs `apply_adbroot` early so adbd can come up root on its
   first start on ROMs that don't reset `ro.secure` (no restart needed there).
 - `service.sh`: after boot, if adbd isn't already root, re-applies until
